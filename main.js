@@ -10,6 +10,9 @@ const Errors = {
     overlapping_intervals: new Error('Overlapping intervals'),
     incorrect_interval_range: new Error('Interval min can\'t be larger than max'),
     bad_initialization: new Error('Bad initialization')
+  },
+  Figure: {
+    not_drawing: new Error('Object must be of type Drawing')
   }
 }
 
@@ -77,18 +80,86 @@ function deepCopy({ destObj, srcObj }) {
   deepCopyRec(destObj, srcObj)
   return destObj
 }
+
 function prepareSite() {
   document.head.replaceChildren()
   document.body.replaceChildren()
   document.body.style.width = '100vw'
   document.body.style.height = '100vh'
   document.body.style.margin = '0'
+  const style = document.createElement('style')
+  style.textContent = `
+    .menu {
+      position: fixed;
+      top: 1rem;
+      left: 1rem;
+      background-color: #e4e4e4;
+      overflow-y: auto;
+      max-height: 200px;
+      padding: .5rem;
+      border-radius: .5rem;
+    }
+  
+    .option {
+      background-color: white;
+      margin-bottom: .5rem;
+      border-radius: .3rem;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      user-select: none;
+    }
+  
+    .menu div[selected=''] {
+      background-color: gray;
+    }
+  
+    .name {
+      display: inline-block;
+      margin: 0;
+      margin-inline: .5rem;
+      pointer-events: none;
+    }
+  
+    .color {
+      display: inline-block;
+      height: 10px;
+      width: 10px;
+      margin-inline: .5rem;
+      pointer-events: none;
+    }
+  
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 4px;
+    }
+    ::-webkit-scrollbar-track {
+      box-shadow: inset 0 0 5px grey; 
+      border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: gray; 
+      border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #3a3a3a; 
+    }
+  `
+  document.body.appendChild(style)
+
+  const dropDownMenu = document.createElement('div')
+  dropDownMenu.classList.add('menu')
+  dropDownMenu.id = 'dropdown-menu'
+  document.body.appendChild(dropDownMenu)
 }
 
 prepareSite()
 
 class Figure {
   static idx = 0
+  static fId = 0
+
   constructor() {
     this.canvas = document.createElement('canvas')
     this.canvas.id = 'Figure ' + Figure.idx++
@@ -121,10 +192,13 @@ class Figure {
     deepCopy({ srcObj: this.defaults.scale, destObj: this.scale })
     this.axes = new Axes(this)
     this.axes.plot()
-    this.methods = new Methods(this)
+    // this.methods = new Methods(this)
 
     this.precision = this.defaults.precision
-    this.functions = []
+    this.functions = new Map()
+    this.drawings = []
+
+    this.dropDownMenu = document.getElementById('dropdown-menu')
 
     this.canvas.addEventListener('mousemove', ev => {
       if (ev.buttons === 1) {
@@ -178,18 +252,68 @@ class Figure {
     }, 20)
   }
 
-  addFunction(f, color = 'red') {
-    this.functions.push({ f, color })
+  addFunction(f) {
+    const option = document.createElement('div')
+    option.classList.add('option')
+    option.fKey = 'f' + Figure.fId++
+    option.id = option.fKey
+    option.selected = false
+
+    const color = document.createElement('div')
+    color.classList.add('color')
+    color.style.backgroundColor = f.styling.strokeStyle
+
+    const functionName = document.createElement('p')
+    functionName.textContent = option.fKey
+    functionName.classList.add('name')
+
+    const deleteBtn = document.createElement('button')
+    deleteBtn.textContent = 'X'
+    deleteBtn.addEventListener('click', ev => {
+      this.removeFunction(ev.target.parentElement.fKey)
+    })
+
+    option.appendChild(color)
+    option.appendChild(functionName)
+    option.appendChild(deleteBtn)
+
+    option.addEventListener('click', ev => {
+      ev.target.selected = !ev.target.selected
+      if (ev.target.selected) {
+        option.setAttribute('selected', '')
+        f.visible = false
+      } else {
+        option.removeAttribute('selected')
+        f.visible = true
+      }
+      this.draw()
+    })
+
+    option.addEventListener('mouseover', ev => {
+      f.highlight()
+      this.draw()
+    })
+
+    option.addEventListener('mouseleave', ev => {
+      f.unhighlight()
+      this.draw()
+    })
+
+    this.dropDownMenu.appendChild(option)
+
+    this.functions.set(option.fKey, f)
     this.draw()
   }
 
-  removeFunction(fIdx) {
-    this.functions.splice(fIdx, 1)
+  removeFunction(fKey) {
+    document.getElementById(fKey).remove()
+    this.functions.delete(fKey)
     this.draw()
   }
 
   clearFunctions() {
-    this.functions.length = 0
+    this.dropDownMenu.replaceChildren()
+    this.functions.clear()
     this.draw()
   }
 
@@ -203,30 +327,35 @@ class Figure {
   draw() {
     this.clear()
     this.axes.plot()
-    for (let i = 0; i < this.functions.length; ++i) {
-      this.plotFunction(this.functions[i])
+    for (const f of this.functions.values()) {
+      if (f.visible) this.plotFunction(f)
+    }
+    for (const drawing of this.drawings) {
+      drawing.draw()
     }
   }
 
-  // get origin() {
-  //   return this.canvasToFigureCoords(this.axes.origin)
-  //   // return {
-  //   //   x: this.axes.origin.i / (this.scale.x.val * 2 ** this.scale.x.factor),
-  //   //   y: this.axes.origin.j / (this.scale.y.val * 2 ** this.scale.y.factor)
-  //   // }
-  // }
+  figureToCanvas1d({ x, y }) {
+    if (x != null) return this.axes.origin.i + x * this.scale.x.val * 2 ** this.scale.x.factor
+    if (y != null) return this.axes.origin.j - y * this.scale.y.val * 2 ** this.scale.y.factor
+  }
 
   figureToCanvasCoords({ x, y }) {
     return {
-      i: this.axes.origin.i + x * this.scale.x.val * 2 ** this.scale.x.factor,
-      j: this.axes.origin.j - y * this.scale.y.val * 2 ** this.scale.y.factor,
+      i: this.figureToCanvas1d({ x }),
+      j: this.figureToCanvas1d({ y }),
     }
+  }
+
+  canvasToFigure1d({ i, j }) {
+    if (i != null) return (i - this.axes.origin.i) / (this.scale.x.val * 2 ** this.scale.x.factor)
+    if (j != null) return (j - this.axes.origin.j) / (this.scale.y.val * 2 ** this.scale.y.factor)
   }
 
   canvasToFigureCoords({ i, j }) {
     return {
-      x: (i - this.axes.origin.i) / (this.scale.x.val * 2 ** this.scale.x.factor),
-      y: (j - this.axes.origin.j) / (this.scale.y.val * 2 ** this.scale.y.factor),
+      x: this.canvasToFigure1d({ i }),
+      y: this.canvasToFigure1d({ j }),
     }
   }
 
@@ -245,21 +374,24 @@ class Figure {
     this.ctx.restore()
   }
 
-  plotFunction({ f, color = 'red' }) {
+  plotFunction(f) {
     this.ctx.save()
-    this.ctx.strokeStyle = color
-    this.ctx.lineWidth = 1
+
+    for (const key in f.styling) {
+      this.ctx[key] = f.styling[key]
+    }
+
     this.ctx.beginPath()
 
     // let dynamicPrecision = this.precision, prevPrecision = this.precision, prevAngle = 0, prevPieceIdx = null
     // const prevPoint = { x: 0, y: 0 }
     let prevPieceIdx = null
     for (let i = 0; i <= this.canvas.width; i += this.precision/* dynamicPrecision */) {
-      const x = this.canvasToFigureCoords({ i }).x
+      const x = this.canvasToFigure1d({ i })
       const pieceIdx = f.pieceIdx(x)
       if (pieceIdx !== null) {
         const y = f.eval(x)
-        const j = this.figureToCanvasCoords({ y }).j
+        const j = this.figureToCanvas1d({ y })
         if (prevPieceIdx !== pieceIdx) {
           if (prevPieceIdx !== null) {
             const prevPieceRightLim = this.figureToCanvasCoords(f.getPieceLimits(prevPieceIdx).right)
@@ -369,6 +501,12 @@ class Figure {
     this.axes.center()
     this.draw()
   }
+
+  addDrawing(drawing) {
+    if (!drawing instanceof Drawing) throw Errors.Figure.not_drawing
+    this.drawings.push(drawing)
+    this.draw()
+  }
 }
 
 class Axes {
@@ -471,7 +609,12 @@ class Function {
   // Initialize with either a function or an array of the form:
   // [{f: functionPiece1, interval: '[min, max]'||'[min, max)'||etc}, ...]
   // where an undefined interval is equivalent to (-Infinity, Infinity).
-  constructor(funOrPiecewiseArr) {
+  constructor(funOrPiecewiseArr, color = 'red') {
+    this.styling = {
+      strokeStyle: color,
+      lineWidth: 1,
+    }
+    this.visible = true
     if (typeof funOrPiecewiseArr === 'function') {
       this.pieces = [{
         f: funOrPiecewiseArr,
@@ -576,42 +719,115 @@ class Function {
     limits.right.y = this.pieces[pieceIdx].f(limits.right.x)
     return limits
   }
+
+  toggleVisibility() {
+    this.visible = !this.visible
+  }
+
+  highlight() {
+    this.styling.lineWidth = 2.5
+  }
+  unhighlight() {
+    this.styling.lineWidth = 1
+  }
+}
+
+class Drawing {
+  constructor({ figure, points, text, styling, stroke = true, fill = false }) {
+    this.figure = figure
+    this.ctx = figure.ctx
+    this.origin = figure.axes.origin
+    this.points = points // In figure coords
+    this.text = text
+    this.styling = styling
+    this.stroke = stroke
+    this.fill = fill
+  }
+
+  getCavnasPoint(point) {
+    if (point.x != null && point.y != null) return this.figure.figureToCanvasCoords(point)
+    else if (point.i != null && point.j != null) return point
+    else if (point.k != null && point.l != null) return {
+      i: typeof point.k === 'number' ? this.origin.i + point.k : this.figure.figureToCanvas1d({ x: point.k.x }) + point.k.k,
+      j: typeof point.l === 'number' ? this.origin.j + point.l : this.figure.figureToCanvas1d({ y: point.k.y }) + point.l.l,
+    }
+    else if (point.x != null && point.j != null) return { i: this.figure.figureToCanvas1d({ x: point.x }), j: point.j }
+    else if (point.x != null && point.l != null) return {
+      i: this.figure.figureToCanvas1d({ x: point.x }),
+      j: typeof point.l === 'number' ? this.origin.j + point.l : this.figure.figureToCanvas1d({ y: point.k.y }) + point.l.l,
+    }
+    else if (point.i != null && point.y != null) return { i: point.i, j: this.figure.figureToCanvas1d({ y: point.y }) }
+    else if (point.k != null && point.y != null) return {
+      i: typeof point.k === 'number' ? this.origin.i + point.k : this.figure.figureToCanvas1d({ x: point.k.x }) + point.k.k,
+      j: this.figure.figureToCanvas1d({ y: point.y })
+    }
+    else return undefined
+  }
+
+  canvasPoints() {
+    const canvasPoints = []
+    let canvasPoint
+    for (const point of this.points) {
+      canvasPoint = this.getCavnasPoint(point)
+      if (canvasPoint) canvasPoints.push(canvasPoint)
+      else console.warn('A point in the drawing had incorrect format')
+    }
+    return canvasPoints
+  }
+
+  draw() {
+    this.ctx.save()
+
+    for (const key in this.styling) {
+      this.ctx[key] = this.styling[key]
+    }
+
+    this.ctx.beginPath()
+    const canvasPoints = this.canvasPoints()
+    this.ctx.moveTo(canvasPoints[0].i, canvasPoints[0].j)
+    for (let i = 1; i < canvasPoints.length; ++i) {
+      this.ctx.lineTo(canvasPoints[i].i, canvasPoints[i].j)
+    }
+    for (const textElem of this.text) {
+      const position = this.getCavnasPoint(textElem.position)
+      this.ctx.fillText(textElem.string, position.i, position.j)
+    }
+    if (this.stroke) this.ctx.stroke()
+    if (this.fill) this.ctx.fill()
+
+    this.ctx.restore()
+  }
 }
 
 class Methods {
   constructor(figure) {
     this.figure = figure
-    this.axes = figure.axes
     this.ctx = figure.ctx
     this.scale = figure.scale
   }
 
-  plotBrakets(interval, labels, color = 'blue') {
+  plotBrackets(interval, label, color = 'blue') {
+    const styling = {
+      lineWidth: 2,
+      strokeStyle: color,
+      textAlign: 'center',
+      fontSize: '13px sans-serif',
+    }
+
     const size = { v: 30, h: 10 }
-    const canvasCoords = {}
-    canvasCoords.min = this.figure.figureToCanvasCoords({ x: interval.min }).i
-    canvasCoords.max = this.figure.figureToCanvasCoords({ x: interval.max }).i
+    const points = [
+      { k: { x: interval.min, k: size.h }, l: -size.v / 2 },
+      { x: interval.min, l: -size.v / 2 },
+      { x: interval.min, l: size.v / 2 },
+      { k: { x: interval.min, k: size.h }, l: size.v / 2 },
+    ]
 
-    this.ctx.save()
-    this.ctx.lineWidth = 2
-    this.ctx.strokeStyle = color
-    this.ctx.textAlign = 'center'
-    this.ctx.fontSize = '13px sans-serif'
+    const text = [{
+      position: { x: interval.min, l: size.v },
+      string: label
+    }]
 
-    this.ctx.moveTo(canvasCoords.min + size.h, this.axes.origin.j - size.v / 2)
-    this.ctx.lineTo(canvasCoords.min, this.axes.origin.j - size.v / 2)
-    this.ctx.lineTo(canvasCoords.min, this.axes.origin.j + size.v / 2)
-    this.ctx.lineTo(canvasCoords.min + size.h, this.axes.origin.j + size.v / 2)
-    if (labels?.min) this.ctx.fillText(labels.min, canvasCoords.min, this.axes.origin.j + size.v)
-
-    this.ctx.moveTo(canvasCoords.max - size.h, this.axes.origin.j - size.v / 2)
-    this.ctx.lineTo(canvasCoords.max, this.axes.origin.j - size.v / 2)
-    this.ctx.lineTo(canvasCoords.max, this.axes.origin.j + size.v / 2)
-    this.ctx.lineTo(canvasCoords.max - size.h, this.axes.origin.j + size.v / 2)
-    if (labels?.max) this.ctx.fillText(labels.max, canvasCoords.max, this.axes.origin.j + size.v)
-
-    this.ctx.stroke()
-    this.ctx.restore()
+    this.figure.addDrawing(new Drawing({ figure: this.figure, points, text, styling }))
   }
 }
 
@@ -620,13 +836,14 @@ const f = x => 0.0000000068 * x ** 3 - 0.0000045 * x ** 2 + 0.0023 * x + 0.43
 fig.addFunction(new Function([
   { f, interval: '(0, 1000]' },
   { f: x => f(1000), interval: '(1000, inf)' },
-]), 'blue')
+], 'blue'))
 fig.addFunction(new Function([
   { f: x => Math.sin(x ** 2), interval: '[1, 3]' },
   { f: x => x - 3 + Math.sin(3 ** 2), interval: '(3, 5)' },
   { f: x => 4, interval: '[6, 8)' },
-]), 'red')
-fig.addFunction(new Function(x => x ** 2), 'green')
+], 'red'))
+fig.addFunction(new Function(x => x ** 2, 'green'))
 fig.setInDocument()
 
-M.plotBrakets({ min: 1, max: 5 }, { min: 'a = 1', max: 'b = 5' })
+const M = new Methods(fig)
+M.plotBrackets({ min: 3, max: 5 }, 'a = 4', 'purple')
