@@ -12,7 +12,8 @@ const Errors = {
     bad_initialization: new Error('Bad initialization')
   },
   Figure: {
-    not_drawing: new Error('Object must be of type Drawing')
+    not_function: new Error('Object must be of type Function'),
+    not_drawing: new Error('Object must be of type Drawing'),
   }
 }
 
@@ -130,9 +131,21 @@ function prepareSite() {
       pointer-events: none;
     }
   
+    .info-box {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      background-color: #e4e4e4;
+      overflow-y: auto;
+      max-height: 200px;
+      padding: .5rem;
+      border-radius: .5rem;
+    }
+
     /* Scrollbar */
     ::-webkit-scrollbar {
       width: 4px;
+      height: 4px;
     }
     ::-webkit-scrollbar-track {
       box-shadow: inset 0 0 5px grey; 
@@ -159,6 +172,7 @@ prepareSite()
 class Figure {
   static idx = 0
   static fId = 0
+  static dId = 0
 
   constructor() {
     this.canvas = document.createElement('canvas')
@@ -196,13 +210,15 @@ class Figure {
 
     this.precision = this.defaults.precision
     this.functions = new Map()
-    this.drawings = []
+    this.drawings = new Map()
 
     this.dropDownMenu = document.getElementById('dropdown-menu')
 
     this.canvas.addEventListener('mousemove', ev => {
-      if (ev.buttons === 1) {
+      if (ev.buttons === 1 && !ev.ctrlKey) {
         this.pan({ x: ev.movementX, y: ev.movementY })
+      } else if (ev.buttons === 1 && ev.ctrlKey) {
+
       }
     })
 
@@ -252,71 +268,6 @@ class Figure {
     }, 20)
   }
 
-  addFunction(f) {
-    const option = document.createElement('div')
-    option.classList.add('option')
-    option.fKey = 'f' + Figure.fId++
-    option.id = option.fKey
-    option.selected = false
-
-    const color = document.createElement('div')
-    color.classList.add('color')
-    color.style.backgroundColor = f.styling.strokeStyle
-
-    const functionName = document.createElement('p')
-    functionName.textContent = option.fKey
-    functionName.classList.add('name')
-
-    const deleteBtn = document.createElement('button')
-    deleteBtn.textContent = 'X'
-    deleteBtn.addEventListener('click', ev => {
-      this.removeFunction(ev.target.parentElement.fKey)
-    })
-
-    option.appendChild(color)
-    option.appendChild(functionName)
-    option.appendChild(deleteBtn)
-
-    option.addEventListener('click', ev => {
-      ev.target.selected = !ev.target.selected
-      if (ev.target.selected) {
-        option.setAttribute('selected', '')
-        f.visible = false
-      } else {
-        option.removeAttribute('selected')
-        f.visible = true
-      }
-      this.draw()
-    })
-
-    option.addEventListener('mouseover', ev => {
-      f.highlight()
-      this.draw()
-    })
-
-    option.addEventListener('mouseleave', ev => {
-      f.unhighlight()
-      this.draw()
-    })
-
-    this.dropDownMenu.appendChild(option)
-
-    this.functions.set(option.fKey, f)
-    this.draw()
-  }
-
-  removeFunction(fKey) {
-    document.getElementById(fKey).remove()
-    this.functions.delete(fKey)
-    this.draw()
-  }
-
-  clearFunctions() {
-    this.dropDownMenu.replaceChildren()
-    this.functions.clear()
-    this.draw()
-  }
-
   clear() {
     this.ctx.save()
     this.ctx.resetTransform()
@@ -330,8 +281,8 @@ class Figure {
     for (const f of this.functions.values()) {
       if (f.visible) this.plotFunction(f)
     }
-    for (const drawing of this.drawings) {
-      drawing.draw()
+    for (const drawing of this.drawings.values()) {
+      if (drawing.visible) drawing.draw()
     }
   }
 
@@ -492,6 +443,10 @@ class Figure {
     this.draw()
   }
 
+  zoomWindow(point1, point2) {
+
+  }
+
   resetZoom() {
     deepCopy({ srcObj: this.defaults.scale, destObj: this.scale })
     this.draw()
@@ -502,9 +457,103 @@ class Figure {
     this.draw()
   }
 
-  addDrawing(drawing) {
-    if (!drawing instanceof Drawing) throw Errors.Figure.not_drawing
-    this.drawings.push(drawing)
+  addOption(optionKey, obj) {
+    const option = document.createElement('div')
+    option.classList.add('option')
+    option.key = optionKey
+    option.id = optionKey
+    option.selected = false
+
+    const color = document.createElement('div')
+    color.classList.add('color')
+
+    const objName = document.createElement('p')
+    objName.textContent = optionKey
+    objName.classList.add('name')
+
+    const deleteBtn = document.createElement('button')
+    deleteBtn.textContent = 'X'
+    deleteBtn.addEventListener('click', ev => {
+      const key = ev.target.parentElement.key
+      if (this.functions.has(key)) this.removeFunction(key)
+      else if (this.drawings.has(key)) this.removeDrawing(key)
+    })
+
+    option.appendChild(color)
+    option.appendChild(objName)
+    option.appendChild(deleteBtn)
+    this.dropDownMenu.appendChild(option)
+    this.setOptionObject(optionKey, obj)
+
+    option.addEventListener('click', ev => {
+      ev.target.selected = !ev.target.selected
+      if (ev.target.selected) {
+        option.setAttribute('selected', '')
+        option.object.visible = false
+      } else {
+        option.removeAttribute('selected')
+        option.object.visible = true
+      }
+      this.draw()
+    })
+
+    option.addEventListener('mouseover', ev => {
+      option.object.highlight()
+      this.draw()
+    })
+
+    option.addEventListener('mouseleave', ev => {
+      option.object.unhighlight()
+      this.draw()
+    })
+  }
+
+  setOptionObject(optionKey, obj) {
+    const option = this.getOption(optionKey)
+    if (option.selected) obj.visible = false
+    option.object = obj
+    option.querySelector('.color').style.backgroundColor = obj.styling.strokeStyle
+  }
+
+  getOption(key) {
+    return this.dropDownMenu.children[key]
+  }
+
+  addFunction(f, key = '') {
+    if (!(f instanceof Function)) throw Errors.Figure.not_function
+    if (!key) key = 'F' + Figure.fId++
+    if (!this.getOption(key)) this.addOption(key, f)
+    else this.setOptionObject(key, f)
+    this.functions.set(key, f)
+    this.draw()
+    return key
+  }
+
+  removeFunction(key) {
+    this.getOption(key).remove()
+    this.functions.delete(key)
+    this.draw()
+  }
+
+  clearFunctions() {
+    this.dropDownMenu.replaceChildren()
+    this.functions.clear()
+    this.draw()
+  }
+
+  addDrawing(drawing, key = '') {
+    if (!(drawing instanceof Drawing)) throw Errors.Figure.not_drawing
+    if (!key) key = 'D' + Figure.dId++
+    if (!this.getOption(key)) this.addOption(key, drawing)
+    else this.setOptionObject(key, drawing)
+    this.drawings.set(key, drawing)
+    this.draw()
+    return key
+  }
+
+  removeDrawing(key) {
+    this.getOption(key).remove()
+    this.drawings.delete(key)
     this.draw()
   }
 }
@@ -529,11 +578,12 @@ class Axes {
     this.ctx.fillStyle = 'black'
     const fontSize = 11
     this.ctx.font = fontSize + 'px sans-serif'
-    this.ctx.textAlign = 'center'
 
     this.ctx.beginPath()
     const vLines = this.origin.i / this.scale.x.val
     const xGridSep = 2 ** this.scale.x.factor
+    this.ctx.textAlign = 'center'
+    const labelsJpos = this.origin.j + 2.5 * gridLineLen
     for (
       let i = vLines % 1 * this.scale.x.val, n = -parseInt(vLines) / xGridSep;
       i < this.ctx.canvas.width;
@@ -544,22 +594,32 @@ class Axes {
       if (gridLineLen) {
         const nToPrec = n.toPrecision(3).replace(/(\.[1-9]*)0+$/, '$1').replace(/\.$/, '')
         const nStr = nToPrec.length <= n.toExponential(2).length ? nToPrec : n.toExponential(2)
-        this.ctx.fillText(nStr, n !== 0 ? i : i - fontSize / 2, this.origin.j + 2.5 * gridLineLen)
+        const ni = (n !== 0 ? i : i - fontSize / 1.2)
+
+        if (fontSize < labelsJpos && labelsJpos < this.figure.canvas.height) this.ctx.fillText(nStr, ni, labelsJpos)
+        else if (labelsJpos <= fontSize) this.ctx.fillText(nStr, ni, fontSize)
+        else this.ctx.fillText(nStr, ni, this.figure.canvas.height)
       }
     }
     const hLines = this.origin.j / this.scale.y.val
     const yGridSep = 2 ** this.scale.y.factor
+    const labelsIpos = this.origin.i + 2.5 * gridLineLen
+    this.ctx.textAlign = labelsIpos < this.figure.canvas.width - fontSize ? 'left' : 'right'
     for (
-      let i = hLines % 1 * this.scale.y.val, n = parseInt(hLines) / yGridSep;
-      i < this.ctx.canvas.height;
-      i += this.scale.y.val, n -= 1 / yGridSep
+      let j = hLines % 1 * this.scale.y.val, n = parseInt(hLines) / yGridSep;
+      j < this.ctx.canvas.height;
+      j += this.scale.y.val, n -= 1 / yGridSep
     ) {
-      this.ctx.moveTo(gridLineLen ? this.origin.i - gridLineLen / 2 : 0, i)
-      this.ctx.lineTo(gridLineLen ? this.origin.i + gridLineLen / 2 : this.ctx.canvas.width, i)
+      this.ctx.moveTo(gridLineLen ? this.origin.i - gridLineLen / 2 : 0, j)
+      this.ctx.lineTo(gridLineLen ? this.origin.i + gridLineLen / 2 : this.ctx.canvas.width, j)
       if (gridLineLen) {
         const nToPrec = n.toPrecision(3).replace(/(\.[1-9]*)0+$/, '$1').replace(/\.$/, '')
-        const nStr = nToPrec.length <= n.toExponential(2).length ? nToPrec : n.toExponential(2)
-        this.ctx.fillText(n !== 0 ? nStr : '', this.origin.i + 2.5 * gridLineLen, i)
+        const nStr = (n !== 0 ? nToPrec.length <= n.toExponential(2).length ? nToPrec : n.toExponential(2) : '')
+        const nj = j
+
+        if (fontSize < labelsIpos && labelsIpos < this.figure.canvas.width) this.ctx.fillText(nStr, labelsIpos, nj)
+        else if (labelsIpos <= fontSize) this.ctx.fillText(nStr, fontSize, nj)
+        else this.ctx.fillText(nStr, this.figure.canvas.width, nj)
       }
     }
     this.ctx.stroke()
@@ -720,10 +780,6 @@ class Function {
     return limits
   }
 
-  toggleVisibility() {
-    this.visible = !this.visible
-  }
-
   highlight() {
     this.styling.lineWidth = 2.5
   }
@@ -733,15 +789,17 @@ class Function {
 }
 
 class Drawing {
-  constructor({ figure, points, text, styling, stroke = true, fill = false }) {
+  constructor({ figure, points, text = [], styling = {}, stroke = true, fill = false }) {
     this.figure = figure
     this.ctx = figure.ctx
     this.origin = figure.axes.origin
     this.points = points // In figure coords
     this.text = text
     this.styling = styling
+    if (!styling.strokeStyle) this.styling.strokeStyle = 'black'
     this.stroke = stroke
     this.fill = fill
+    this.visible = true
   }
 
   getCavnasPoint(point) {
@@ -764,17 +822,6 @@ class Drawing {
     else return undefined
   }
 
-  canvasPoints() {
-    const canvasPoints = []
-    let canvasPoint
-    for (const point of this.points) {
-      canvasPoint = this.getCavnasPoint(point)
-      if (canvasPoint) canvasPoints.push(canvasPoint)
-      else console.warn('A point in the drawing had incorrect format')
-    }
-    return canvasPoints
-  }
-
   draw() {
     this.ctx.save()
 
@@ -783,10 +830,14 @@ class Drawing {
     }
 
     this.ctx.beginPath()
-    const canvasPoints = this.canvasPoints()
-    this.ctx.moveTo(canvasPoints[0].i, canvasPoints[0].j)
-    for (let i = 1; i < canvasPoints.length; ++i) {
-      this.ctx.lineTo(canvasPoints[i].i, canvasPoints[i].j)
+    for (const subDrawingPoints of this.points) {
+      const canvasPoint = this.getCavnasPoint(subDrawingPoints[0])
+      this.ctx.moveTo(canvasPoint.i, canvasPoint.j)
+      for (let i = 1; i < subDrawingPoints.length; ++i) {
+        const canvasPoint = this.getCavnasPoint(subDrawingPoints[i])
+        if (!canvasPoint) console.warn(`Point ${i} in subdrawing`, subDrawingPoints, 'has incorrect format')
+        else this.ctx.lineTo(canvasPoint.i, canvasPoint.j)
+      }
     }
     for (const textElem of this.text) {
       const position = this.getCavnasPoint(textElem.position)
@@ -797,6 +848,13 @@ class Drawing {
 
     this.ctx.restore()
   }
+
+  highlight() {
+    this.styling.lineWidth = 2.5
+  }
+  unhighlight() {
+    this.styling.lineWidth = 1
+  }
 }
 
 class Methods {
@@ -804,46 +862,181 @@ class Methods {
     this.figure = figure
     this.ctx = figure.ctx
     this.scale = figure.scale
+
+    this.infoBox = {
+      container: document.createElement('div'),
+      title: document.createElement('h3'),
+      entries: document.createElement('ul'),
+    }
+    this.infoBox.container.classList.add('info-box')
+    this.infoBox.title.classList.add('info-box-title')
+    this.infoBox.container.appendChild(this.infoBox.title)
+    this.infoBox.container.appendChild(this.infoBox.entries)
+    this.setInfoBoxTitle('Info Box')
+    document.body.appendChild(this.infoBox.container)
   }
 
-  plotBrackets(interval, label, color = 'blue') {
+  toggleInfoBox() {
+    this.infoBox.container.hidden = !this.infoBox.container.hidden
+  }
+
+  clearInfoBox() {
+    this.setInfoBoxTitle('Info Box')
+    this.clearInfoBoxEntries()
+  }
+
+  clearInfoBoxEntries() {
+    this.infoBox.entries.replaceChildren()
+  }
+
+  popInfoBoxEntry() {
+    const li = this.infoBox.entries.lastChild
+    li?.remove()
+    return li
+  }
+
+  setInfoBoxTitle(title) {
+    this.infoBox.title.textContent = title
+  }
+
+  addInfoBoxEntry(entry) {
+    const li = document.createElement('li')
+    li.textContent = entry
+    this.infoBox.entries.appendChild(li)
+    return li
+  }
+
+  updateInfoBoxEntry(li, newEntry) {
+    li.textContent = newEntry
+  }
+
+  plotVertialLine(x, label = '', color = 'blue', drawingKey = '') {
+    const fontSize = 14
     const styling = {
-      lineWidth: 2,
+      lineWidth: 1,
       strokeStyle: color,
       textAlign: 'center',
-      fontSize: '13px sans-serif',
+      font: fontSize + 'px sans-serif',
+      fillStyle: color,
     }
 
     const size = { v: 30, h: 10 }
     const points = [
-      { k: { x: interval.min, k: size.h }, l: -size.v / 2 },
-      { x: interval.min, l: -size.v / 2 },
-      { x: interval.min, l: size.v / 2 },
-      { k: { x: interval.min, k: size.h }, l: size.v / 2 },
+      [
+        { x, j: 0 },
+        { x, j: 50 },
+      ],
+      [
+        { x, j: 50 + 2 * fontSize },
+        { x, j: this.ctx.canvas.height },
+      ],
     ]
 
-    const text = [{
-      position: { x: interval.min, l: size.v },
-      string: label
-    }]
+    const text = [
+      {
+        position: { x, j: 50 + 1.3 * fontSize },
+        string: label
+      },
+    ]
 
-    this.figure.addDrawing(new Drawing({ figure: this.figure, points, text, styling }))
+    return this.figure.addDrawing(new Drawing({ figure: this.figure, points, text, styling }), drawingKey)
+  }
+
+  plotBrackets(interval, label = { min: '', max: '' }, color = 'blue') {
+    const styling = {
+      lineWidth: 2,
+      strokeStyle: color,
+      textAlign: 'center',
+      font: '14px sans-serif',
+      fillStyle: color,
+    }
+
+    const size = { v: 30, h: 10 }
+    const points = [
+      [
+        { k: { x: interval.min, k: size.h }, l: -size.v / 2 },
+        { x: interval.min, l: -size.v / 2 },
+        { x: interval.min, l: size.v / 2 },
+        { k: { x: interval.min, k: size.h }, l: size.v / 2 },
+      ],
+      [
+        { k: { x: interval.max, k: -size.h }, l: -size.v / 2 },
+        { x: interval.max, l: -size.v / 2 },
+        { x: interval.max, l: size.v / 2 },
+        { k: { x: interval.max, k: -size.h }, l: size.v / 2 },
+      ]
+    ]
+
+    const text = [
+      {
+        position: { x: interval.min, l: size.v },
+        string: label.min
+      },
+      {
+        position: { x: interval.max, l: size.v },
+        string: label.max
+      }
+    ]
+
+    return this.figure.addDrawing(new Drawing({ figure: this.figure, points, text, styling }))
+  }
+
+  bisection(f, interval, { precision, iterations, iterDelay = 1000 }) {
+    this.clearInfoBox()
+    this.setInfoBoxTitle('Bisection')
+    let [a, b] = interval
+
+    if (f.eval(a) * f.eval(b) > 0) {
+      console.warn('Can\'t confirm root in interval', interval, ': f(a)*f(b) = ', f.eval(a) * f.eval(b))
+      return
+    }
+
+    let c = (a + b) / 2
+    let delta = (c - a)
+    let steps = 0
+
+    const stepsLi = this.addInfoBoxEntry()
+    const cLi = this.addInfoBoxEntry()
+    const precisionLi = precision ? this.addInfoBoxEntry('precision = ' + precision) : null
+    const deltaLi = this.addInfoBoxEntry()
+
+    const visuals = () => {
+      this.updateInfoBoxEntry(stepsLi, 'steps = ' + steps++)
+      this.updateInfoBoxEntry(cLi, 'c = ' + c.toPrecision(5))
+      this.updateInfoBoxEntry(deltaLi, '|E| <= ' + delta.toPrecision(5))
+      this.plotVertialLine(a, 'a = ' + a.toPrecision(3), 'green', 'a')
+      this.plotVertialLine(b, 'b = ' + b.toPrecision(3), 'green', 'b')
+      this.plotVertialLine(c, 'c = ' + c.toPrecision(3), 'magenta', 'c')
+    }
+    visuals()
+
+    return new Promise(res => {
+      const intId = setInterval(() => {
+        if (delta <= precision || steps > iterations) {
+          clearInterval(intId)
+          this.figure.removeDrawing('a')
+          this.figure.removeDrawing('b')
+          res(c)
+        } else {
+          if (f.eval(a) * f.eval(c) < 0) b = c
+          else a = c
+          c = (a + b) / 2
+          delta = (c - a)
+          visuals()
+        }
+      }, iterDelay)
+    })
   }
 }
 
 const fig = new Figure()
 const f = x => 0.0000000068 * x ** 3 - 0.0000045 * x ** 2 + 0.0023 * x + 0.43
 fig.addFunction(new Function([
-  { f, interval: '(0, 1000]' },
-  { f: x => f(1000), interval: '(1000, inf)' },
-], 'blue'))
-fig.addFunction(new Function([
   { f: x => Math.sin(x ** 2), interval: '[1, 3]' },
   { f: x => x - 3 + Math.sin(3 ** 2), interval: '(3, 5)' },
   { f: x => 4, interval: '[6, 8)' },
 ], 'red'))
-fig.addFunction(new Function(x => x ** 2, 'green'))
 fig.setInDocument()
 
 const M = new Methods(fig)
-M.plotBrackets({ min: 3, max: 5 }, 'a = 4', 'purple')
+// M.bisection(fig.functions.get('F0'), [1.8, 3.8], 0.001)
