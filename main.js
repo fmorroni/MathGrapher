@@ -14,6 +14,9 @@ const Errors = {
   Figure: {
     not_function: new Error('Object must be of type Function'),
     not_drawing: new Error('Object must be of type Drawing'),
+  },
+  Methods: {
+    bisection_bolzano: (f, a, b) => new Error(`Can't confirm root in interval [${a}, ${b}]: f(a)*f(b) = ${f.eval(a) * f.eval(b)}`)
   }
 }
 
@@ -216,13 +219,13 @@ class Figure {
 
     this.canvas.addEventListener('mousemove', ev => {
       if (ev.buttons === 1 && !ev.ctrlKey) {
-        this.pan({ x: ev.movementX, y: ev.movementY })
+        this.pan({ i: ev.movementX, j: ev.movementY })
       } else if (ev.buttons === 1 && ev.ctrlKey) {
 
       }
     })
 
-    const movement = { x: 0, y: 0, step: 20 }
+    const movement = { i: 0, j: 0, step: 20 }
     window.addEventListener('keydown', ev => {
       if (ev.ctrlKey && ev.key !== 'Control') {
         let preventDefault = true
@@ -246,25 +249,25 @@ class Figure {
         if (preventDefault) ev.preventDefault()
       } else {
         switch (ev.key) {
-          case 'w': movement.y = movement.step; break;
-          case 'a': movement.x = movement.step; break;
-          case 's': movement.y = -movement.step; break;
-          case 'd': movement.x = -movement.step; break;
+          case 'w': movement.j = movement.step; break;
+          case 'a': movement.i = movement.step; break;
+          case 's': movement.j = -movement.step; break;
+          case 'd': movement.i = -movement.step; break;
         }
       }
     })
 
     window.addEventListener('keyup', ev => {
       switch (ev.key) {
-        case 'w': movement.y = 0; break;
-        case 'a': movement.x = 0; break;
-        case 's': movement.y = 0; break;
-        case 'd': movement.x = 0; break;
+        case 'w': movement.j = 0; break;
+        case 'a': movement.i = 0; break;
+        case 's': movement.j = 0; break;
+        case 'd': movement.i = 0; break;
       }
     })
 
     setInterval(() => {
-      if (movement.x || movement.y) this.pan(movement)
+      if (movement.i || movement.j) this.pan(movement)
     }, 20)
   }
 
@@ -325,6 +328,7 @@ class Figure {
     this.ctx.restore()
   }
 
+  // Need to fix problem where some functions fail to plot when their right or left limits are too big.
   plotFunction(f) {
     this.ctx.save()
 
@@ -343,26 +347,30 @@ class Figure {
       if (pieceIdx !== null) {
         const y = f.eval(x)
         const j = this.figureToCanvas1d({ y })
-        if (prevPieceIdx !== pieceIdx) {
-          if (prevPieceIdx !== null) {
-            const prevPieceRightLim = this.figureToCanvasCoords(f.getPieceLimits(prevPieceIdx).right)
-            this.ctx.lineTo(prevPieceRightLim.i, prevPieceRightLim.j)
+        if (0 <= j && j <= this.canvas.height) {
+          if (prevPieceIdx !== pieceIdx) {
+            if (prevPieceIdx !== null) {
+              const prevPieceRightLim = this.figureToCanvasCoords(f.getPieceLimits(prevPieceIdx).right)
+              this.ctx.lineTo(prevPieceRightLim.i, prevPieceRightLim.j)
+            }
+            const pieceLeftLim = this.figureToCanvasCoords(f.getPieceLimits(pieceIdx).left)
+            this.ctx.moveTo(pieceLeftLim.i, pieceLeftLim.j)
+            this.ctx.lineTo(i, j)
+            prevPieceIdx = pieceIdx
+            // prevPoint.x = x
+            // prevPoint.y = y
+          } else {
+            this.ctx.lineTo(i, j)
+            // const currentAngle = Math.atan((y - prevPoint.y) / (x - prevPoint.x))
+            // const deltaAngle = Math.abs(currentAngle - prevAngle)
+            // dynamicPrecision = (prevPrecision + this.precision / (deltaAngle > 1 ? deltaAngle : 1)) / 2
+            // prevPrecision = dynamicPrecision
+            // prevPoint.x = x
+            // prevPoint.y = y
+            // prevAngle = currentAngle
           }
-          const pieceLeftLim = this.figureToCanvasCoords(f.getPieceLimits(pieceIdx).left)
-          this.ctx.moveTo(pieceLeftLim.i, pieceLeftLim.j)
-          this.ctx.lineTo(i, j)
-          prevPieceIdx = pieceIdx
-          // prevPoint.x = x
-          // prevPoint.y = y
         } else {
-          this.ctx.lineTo(i, j)
-          // const currentAngle = Math.atan((y - prevPoint.y) / (x - prevPoint.x))
-          // const deltaAngle = Math.abs(currentAngle - prevAngle)
-          // dynamicPrecision = (prevPrecision + this.precision / (deltaAngle > 1 ? deltaAngle : 1)) / 2
-          // prevPrecision = dynamicPrecision
-          // prevPoint.x = x
-          // prevPoint.y = y
-          // prevAngle = currentAngle
+          this.ctx.moveTo(i, j)
         }
       }
     }
@@ -402,8 +410,8 @@ class Figure {
     document.body.appendChild(this.canvas)
   }
 
-  pan({ x = 0, y = 0 }) {
-    this.axes.moveBy(x, y)
+  pan({ i = 0, j = 0 }) {
+    this.axes.moveBy(i, j)
     this.draw()
   }
 
@@ -440,6 +448,15 @@ class Figure {
         --this.scale.y.factor
       }
     }
+    this.draw()
+  }
+
+  zoomH(interval) {
+    const width = this.canvas.width - 20
+    const factor = Math.round(Math.log2(width / ((interval.max - interval.min) * this.defaults.scale.x.val)))
+    const val = width / ((interval.max - interval.min) * (2 ** factor))
+    Object.assign(this.scale.x, { val, factor })
+    this.axes.moveBy(-this.figureToCanvas1d({ x: interval.min }) + 10, 0)
     this.draw()
   }
 
@@ -536,8 +553,8 @@ class Figure {
   }
 
   clearFunctions() {
-    this.dropDownMenu.replaceChildren()
-    this.functions.clear()
+    for (const key of fig.functions.keys()) this.removeFunction(key)
+    Figure.fId = 0
     this.draw()
   }
 
@@ -649,14 +666,14 @@ class Axes {
     this.ctx.restore()
   }
 
-  moveBy(x, y) {
-    this.origin.i += x
-    this.origin.j += y
+  moveBy(i, j) {
+    this.origin.i += i
+    this.origin.j += j
   }
 
-  moveTo(x, y) {
-    this.origin.i = x
-    this.origin.j = y
+  moveTo(i, j) {
+    this.origin.i = i
+    this.origin.j = j
   }
 
   center() {
@@ -684,7 +701,8 @@ class Function {
         }
       }]
     } else if (funOrPiecewiseArr instanceof Array) {
-      const intervalPattern = /[[(]\s*([+-]?(?:\d*\.\d+|\d+|inf|infinity))\s*,\s*([+-]?(?:\d*\.\d+|\d+|inf|infinity))\s*[\])]/i
+      const valuePattern = /([+-]?(?:\d*\.\d+|\d+|\d+e[+-]?\d+|inf|infinity))/
+      const intervalPattern = new RegExp(/[[(]\s*/.source + valuePattern.source + /\s*,\s*/.source + valuePattern.source + /\s*[\])]/.source, 'i')
       for (const piece of funOrPiecewiseArr) {
         if (!piece.interval) {
           piece.interval = {
@@ -874,6 +892,8 @@ class Methods {
     this.infoBox.container.appendChild(this.infoBox.entries)
     this.setInfoBoxTitle('Info Box')
     document.body.appendChild(this.infoBox.container)
+
+    this.intervalIds = []
   }
 
   toggleInfoBox() {
@@ -910,7 +930,7 @@ class Methods {
     li.textContent = newEntry
   }
 
-  plotVertialLine(x, label = '', color = 'blue', drawingKey = '') {
+  plotVerticalLine(x, label = '', color = 'blue', drawingKey = '') {
     const fontSize = 14
     const styling = {
       lineWidth: 1,
@@ -981,16 +1001,28 @@ class Methods {
     return this.figure.addDrawing(new Drawing({ figure: this.figure, points, text, styling }))
   }
 
-  bisection(f, interval, { precision, iterations, iterDelay = 1000 }) {
-    this.clearInfoBox()
-    this.setInfoBoxTitle('Bisection')
-    let [a, b] = interval
+  haltAllMethods() {
+    this.intervalIds.forEach(iid => clearInterval(iid))
+    this.intervalIds.length = 0
+  }
 
-    if (f.eval(a) * f.eval(b) > 0) {
-      console.warn('Can\'t confirm root in interval', interval, ': f(a)*f(b) = ', f.eval(a) * f.eval(b))
-      return
+  semiCheckMonotonic(df, interval, steps = 50) {
+    let [a, b] = interval.min ? [interval.min, interval.max] : interval.sort((prev, current) => (prev > current) ? 1 : -1)
+    const stepWidth = (b - a) / steps
+    let prev = Math.sign(df.eval(a))
+    for (let x = a + stepWidth; x <= b; x += stepWidth) {
+      const current = df.eval(x)
+      if (prev * current < 0) return false
+      prev = current
     }
+    return true
+  }
 
+  bisection(f, interval, { precision, iterations, iterDelay = 1000 } = {}) {
+    this.clearInfoBox()
+    if (!precision && !iterations) precision = 0.001
+    this.setInfoBoxTitle('Bisection')
+    let [a, b] = interval.min ? [interval.min, interval.max] : interval.sort((prev, current) => (prev > current) ? 1 : -1)
     let c = (a + b) / 2
     let delta = (c - a)
     let steps = 0
@@ -999,44 +1031,154 @@ class Methods {
     const cLi = this.addInfoBoxEntry()
     const precisionLi = precision ? this.addInfoBoxEntry('precision = ' + precision) : null
     const deltaLi = this.addInfoBoxEntry()
+    const statusLi = this.addInfoBoxEntry('Status: Ongoing')
 
     const visuals = () => {
       this.updateInfoBoxEntry(stepsLi, 'steps = ' + steps++)
       this.updateInfoBoxEntry(cLi, 'c = ' + c.toPrecision(5))
       this.updateInfoBoxEntry(deltaLi, '|E| <= ' + delta.toPrecision(5))
-      this.plotVertialLine(a, 'a = ' + a.toPrecision(3), 'green', 'a')
-      this.plotVertialLine(b, 'b = ' + b.toPrecision(3), 'green', 'b')
-      this.plotVertialLine(c, 'c = ' + c.toPrecision(3), 'magenta', 'c')
+      this.plotVerticalLine(a, 'a = ' + a.toPrecision(3), 'green', 'a')
+      this.plotVerticalLine(b, 'b = ' + b.toPrecision(3), 'green', 'b')
+      this.plotVerticalLine(c, 'c = ' + c.toPrecision(3), 'magenta', 'c')
     }
-    visuals()
 
-    return new Promise(res => {
-      const intId = setInterval(() => {
-        if (delta <= precision || steps > iterations) {
-          clearInterval(intId)
-          this.figure.removeDrawing('a')
-          this.figure.removeDrawing('b')
-          res(c)
-        } else {
-          if (f.eval(a) * f.eval(c) < 0) b = c
-          else a = c
-          c = (a + b) / 2
-          delta = (c - a)
-          visuals()
+    let mult = f.eval(a) * f.eval(b)
+    if (mult > 0) {
+      this.clearInfoBox()
+      throw Errors.Methods.bisection_bolzano(f, a, b)
+    } else if (mult === 0) {
+      c = f.eval(a) === 0 ? a : b
+      delta = 0
+      visuals()
+      this.figure.removeDrawing('a')
+      this.figure.removeDrawing('b')
+    } else {
+      visuals()
+
+      return new Promise((res, rej) => {
+        const intId = setInterval(() => {
+          if (delta <= precision || steps > iterations) {
+            clearInterval(intId)
+            this.figure.removeDrawing('a')
+            this.figure.removeDrawing('b')
+            this.updateInfoBoxEntry(statusLi, 'Status: Finished')
+            res({ c, delta, steps })
+          } else {
+            mult = f.eval(a) * f.eval(c)
+            if (mult === 0) {
+              delta = 0
+              --steps
+            }
+            else {
+              if (mult < 0) b = c
+              else if (mult > 0) a = c
+              else {
+                clearInterval(intId)
+                this.updateInfoBoxEntry(statusLi, 'Status: Error')
+                rej()
+                throw Errors.Methods.bisection_bolzano(f, a, c)
+              }
+              c = (a + b) / 2
+              delta = (c - a)
+            }
+            visuals()
+          }
+        }, iterDelay)
+        this.intervalIds.push(intId)
+      })
+    }
+  }
+
+  // bisection(f, interval, {precision, iterations, iterDelay = 1000} = {}) {
+  newton({ interval, f, df, ddf, precision, iterations, iterDelay = 1000 }) {
+    this.clearInfoBox()
+    if (!precision && !iterations) precision = 0.001
+    this.setInfoBoxTitle('Newton')
+    let [a, b] = interval.min ? [interval.min, interval.max] : interval.sort((prev, current) => (prev > current) ? 1 : -1)
+    let delta = b - a
+    let steps = 0
+    let xn, xnPrev
+
+    const stepsLi = this.addInfoBoxEntry()
+    const xnLi = this.addInfoBoxEntry()
+    const precisionLi = precision ? this.addInfoBoxEntry('precision = ' + precision) : null
+    const deltaLi = this.addInfoBoxEntry()
+    const statusLi = this.addInfoBoxEntry('Status: Ongoing')
+    this.plotVerticalLine(a, 'a = ' + a.toPrecision(3), 'green', 'a')
+    this.plotVerticalLine(b, 'b = ' + b.toPrecision(3), 'green', 'b')
+
+    const visuals = () => {
+      this.updateInfoBoxEntry(stepsLi, 'steps = ' + steps)
+      this.updateInfoBoxEntry(xnLi, `x${steps} = ${xn.toPrecision(5)}`)
+      this.updateInfoBoxEntry(deltaLi, '|E| ≈ ' + delta.toPrecision(5))
+      this.plotVerticalLine(xn, `x${steps} = ${xn.toPrecision(3)}`, 'magenta', 'xn')
+      if (xnPrev) {
+        this.plotVerticalLine(xnPrev, `x${steps - 1} = ${xnPrev.toPrecision(3)}`, 'grey', 'xn-1')
+        const slopeFunction = new Function(x => df.eval(xnPrev) * (x - xnPrev) + f.eval(xnPrev), 'magenta')
+        this.figure.addFunction(slopeFunction, 'slope')
+      }
+    }
+
+    let bolzanoMult = f.eval(a) * f.eval(b)
+    if (bolzanoMult > 0) {
+      this.clearInfoBox()
+      throw Errors.Methods.bisection_bolzano(f, a, b)
+    } else if (bolzanoMult === 0) {
+      xn = f.eval(a) === 0 ? a : b
+      delta = 0
+      visuals()
+    } else {
+      if (!this.semiCheckMonotonic(df, interval)) console.warn('Function is not monotonic, can\'t confirm single root. Method may diverge.')
+      if (ddf) {
+        if (f.eval(a) * ddf.eval(a) > 0) xn = a
+        else if (f.eval(b) * ddf.eval(b) > 0) xn = b
+        else {
+          console.warn("Doesn't verify that f(a)*f''(a) > 0 or f(b)*f''(b) > 0. Choosing x0 = a, but method may diverge.")
+          xn = a
         }
-      }, iterDelay)
-    })
+      } else {
+        console.warn("Couldn't verify if f(a)*f''(a) > 0 or f(b)*f''(b) > 0. Choosing x0 = a")
+        console.warn('Remember checking if f is monotonic (df > 0 or df < 0) for all x in', interval)
+        xn = a
+      }
+      visuals()
+      return new Promise(res => {
+        const intId = setInterval(() => {
+          if (delta <= precision || steps > iterations) {
+            clearInterval(intId)
+            this.figure.removeFunction('slope')
+            this.figure.removeDrawing('xn-1')
+            this.updateInfoBoxEntry(statusLi, 'Status: Finished')
+            res({ xn, delta, steps })
+          } else {
+            xnPrev = xn
+            xn -= f.eval(xn) / df.eval(xn)
+            delta = Math.abs(xn - xnPrev)
+            ++steps
+            visuals()
+          }
+        }, iterDelay)
+        this.intervalIds.push(intId)
+      })
+    }
   }
 }
 
 const fig = new Figure()
-const f = x => 0.0000000068 * x ** 3 - 0.0000045 * x ** 2 + 0.0023 * x + 0.43
-fig.addFunction(new Function([
-  { f: x => Math.sin(x ** 2), interval: '[1, 3]' },
-  { f: x => x - 3 + Math.sin(3 ** 2), interval: '(3, 5)' },
-  { f: x => 4, interval: '[6, 8)' },
-], 'red'))
+// fig.addFunction(new Function([
+//   { f: x => Math.sin(x ** 2), interval: '[1, 3]' },
+//   { f: x => x - 3 + Math.sin(3 ** 2), interval: '(3, 5)' },
+//   { f: x => 4, interval: '[6, 8)' },
+// ], 'red'))
 fig.setInDocument()
 
 const M = new Methods(fig)
 // M.bisection(fig.functions.get('F0'), [1.8, 3.8], 0.001)
+
+// const f = new Function(x => Math.sin(x)+0.8, 'red')
+// const df = new Function(x => Math.cos(x), 'orange')
+// const ddf = new Function(x => -Math.sin(x), 'blue')
+// fig.addFunction(f, 'f')
+// fig.addFunction(df, 'df')
+// fig.addFunction(ddf, 'ddf')
+// M.newton([3.25, 4.5], f, df, ddf, {precision: 1e-12, iterDelay: 2000})
