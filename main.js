@@ -125,8 +125,16 @@ function prepareSite() {
       margin-inline: .5rem;
       pointer-events: none;
     }
+
+    .stroke-color {
+      display: inline-block;
+      height: 2px;
+      width: 15px;
+      margin-inline: .5rem;
+      pointer-events: none;
+    }
   
-    .color {
+    .fill-color {
       display: inline-block;
       height: 10px;
       width: 10px;
@@ -282,10 +290,10 @@ class Figure {
     this.clear()
     this.axes.plot()
     for (const f of this.functions.values()) {
-      if (f.visible) this.plotFunction(f)
+      f.draw()
     }
     for (const drawing of this.drawings.values()) {
-      if (drawing.visible) drawing.draw()
+      drawing.draw()
     }
   }
 
@@ -325,82 +333,6 @@ class Figure {
     this.ctx.stroke()
     this.ctx.fillStyle = this.backgroundColor
     this.ctx.fill()
-    this.ctx.restore()
-  }
-
-  // Need to fix problem where some functions fail to plot when their right or left limits are too big.
-  plotFunction(f) {
-    this.ctx.save()
-
-    for (const key in f.styling) {
-      this.ctx[key] = f.styling[key]
-    }
-
-    this.ctx.beginPath()
-
-    // let dynamicPrecision = this.precision, prevPrecision = this.precision, prevAngle = 0, prevPieceIdx = null
-    // const prevPoint = { x: 0, y: 0 }
-    let prevPieceIdx = null
-    for (let i = 0; i <= this.canvas.width; i += this.precision/* dynamicPrecision */) {
-      const x = this.canvasToFigure1d({ i })
-      const pieceIdx = f.pieceIdx(x)
-      if (pieceIdx !== null) {
-        const y = f.eval(x)
-        const j = this.figureToCanvas1d({ y })
-        if (0 <= j && j <= this.canvas.height) {
-          if (prevPieceIdx !== pieceIdx) {
-            if (prevPieceIdx !== null) {
-              const prevPieceRightLim = this.figureToCanvasCoords(f.getPieceLimits(prevPieceIdx).right)
-              this.ctx.lineTo(prevPieceRightLim.i, prevPieceRightLim.j)
-            }
-            const pieceLeftLim = this.figureToCanvasCoords(f.getPieceLimits(pieceIdx).left)
-            this.ctx.moveTo(pieceLeftLim.i, pieceLeftLim.j)
-            this.ctx.lineTo(i, j)
-            prevPieceIdx = pieceIdx
-            // prevPoint.x = x
-            // prevPoint.y = y
-          } else {
-            this.ctx.lineTo(i, j)
-            // const currentAngle = Math.atan((y - prevPoint.y) / (x - prevPoint.x))
-            // const deltaAngle = Math.abs(currentAngle - prevAngle)
-            // dynamicPrecision = (prevPrecision + this.precision / (deltaAngle > 1 ? deltaAngle : 1)) / 2
-            // prevPrecision = dynamicPrecision
-            // prevPoint.x = x
-            // prevPoint.y = y
-            // prevAngle = currentAngle
-          }
-        } else {
-          this.ctx.moveTo(i, j)
-        }
-      }
-    }
-    if (prevPieceIdx !== null) {
-      const prevPieceRightLim = this.figureToCanvasCoords(f.getPieceLimits(prevPieceIdx).right)
-      this.ctx.lineTo(prevPieceRightLim.i, prevPieceRightLim.j)
-    }
-    this.ctx.stroke()
-
-    if (prevPieceIdx !== null) {
-      for (let i = 0; i < f.pieces.length; ++i) {
-        const piece = f.pieces[i], prevPiece = f.pieces[i - 1], nextPiece = f.pieces[i + 1]
-        const centerMin = {
-          x: piece.interval.min.val,
-          y: piece.f(piece.interval.min.val)
-        }
-        if (!piece.interval.min.included && centerMin.y !== prevPiece?.f(prevPiece.interval.max.val)) {
-          this.plotEmptyDot(centerMin)
-        }
-
-        const centerMax = {
-          x: piece.interval.max.val,
-          y: piece.f(piece.interval.max.val)
-        }
-        if (!piece.interval.max.included && centerMax.y !== nextPiece?.f(nextPiece.interval.min.val)) {
-          this.plotEmptyDot(centerMax)
-        }
-      }
-    }
-
     this.ctx.restore()
   }
 
@@ -481,12 +413,21 @@ class Figure {
     option.id = optionKey
     option.selected = false
 
-    const color = document.createElement('div')
-    color.classList.add('color')
+    if (obj.styling.strokeStyle) {
+      const strokeColor = document.createElement('div')
+      strokeColor.classList.add('stroke-color')
+      option.appendChild(strokeColor)
+    }
+    if (obj.styling.fillStyle) {
+      const fillColor = document.createElement('div')
+      fillColor.classList.add('fill-color')
+      option.appendChild(fillColor)
+    }
 
     const objName = document.createElement('p')
     objName.textContent = optionKey
     objName.classList.add('name')
+    option.appendChild(objName)
 
     const deleteBtn = document.createElement('button')
     deleteBtn.textContent = 'X'
@@ -495,10 +436,8 @@ class Figure {
       if (this.functions.has(key)) this.removeFunction(key)
       else if (this.drawings.has(key)) this.removeDrawing(key)
     })
-
-    option.appendChild(color)
-    option.appendChild(objName)
     option.appendChild(deleteBtn)
+
     this.dropDownMenu.appendChild(option)
     this.setOptionObject(optionKey, obj)
 
@@ -529,7 +468,8 @@ class Figure {
     const option = this.getOption(optionKey)
     if (option.selected) obj.visible = false
     option.object = obj
-    option.querySelector('.color').style.backgroundColor = obj.styling.strokeStyle
+    if (obj.styling.strokeStyle) option.querySelector('.stroke-color').style.backgroundColor = obj.styling.strokeStyle
+    if (obj.styling.fillStyle) option.querySelector('.fill-color').style.backgroundColor = obj.styling.fillStyle
   }
 
   getOption(key) {
@@ -583,6 +523,7 @@ class Axes {
       i: this.ctx.canvas.width / 2,
       j: this.ctx.canvas.height / 2
     }
+    this.visible = true
   }
 
   get ctx() {
@@ -686,7 +627,10 @@ class Function {
   // Initialize with either a function or an array of the form:
   // [{f: functionPiece1, interval: '[min, max]'||'[min, max)'||etc}, ...]
   // where an undefined interval is equivalent to (-Infinity, Infinity).
-  constructor(funOrPiecewiseArr, color = 'red') {
+  constructor(figure, funOrPiecewiseArr, color = 'red') {
+    this.figure = figure
+    this.ctx = figure.ctx
+    this.canvas = figure.canvas
     this.styling = {
       strokeStyle: color,
       lineWidth: 1,
@@ -749,6 +693,82 @@ class Function {
     }
   }
 
+  draw() {
+    if (!this.visible) return
+    this.ctx.save()
+
+    for (const key in this.styling) {
+      this.ctx[key] = this.styling[key]
+    }
+
+    this.ctx.beginPath()
+
+    // let dynamicPrecision = this.precision, prevPrecision = this.precision, prevAngle = 0, prevPieceIdx = null
+    // const prevPoint = { x: 0, y: 0 }
+    let prevPieceIdx = null
+    for (let i = 0; i <= this.canvas.width; i += this.figure.precision/* dynamicPrecision */) {
+      const x = this.figure.canvasToFigure1d({ i })
+      const pieceIdx = this.pieceIdx(x)
+      if (pieceIdx !== null) {
+        const y = this.eval(x)
+        const j = this.figure.figureToCanvas1d({ y })
+        // if (0 <= j && j <= this.canvas.height) {
+        if (prevPieceIdx !== pieceIdx) {
+          if (prevPieceIdx !== null) {
+            const prevPieceRightLim = this.figure.figureToCanvasCoords(this.getPieceLimits(prevPieceIdx).right)
+            this.ctx.lineTo(prevPieceRightLim.i, prevPieceRightLim.j)
+          }
+          const pieceLeftLim = this.figure.figureToCanvasCoords(this.getPieceLimits(pieceIdx).left)
+          this.ctx.moveTo(pieceLeftLim.i, pieceLeftLim.j)
+          this.ctx.lineTo(i, j)
+          prevPieceIdx = pieceIdx
+          // prevPoint.x = x
+          // prevPoint.y = y
+        } else {
+          this.ctx.lineTo(i, j)
+          // const currentAngle = Math.atan((y - prevPoint.y) / (x - prevPoint.x))
+          // const deltaAngle = Math.abs(currentAngle - prevAngle)
+          // dynamicPrecision = (prevPrecision + this.precision / (deltaAngle > 1 ? deltaAngle : 1)) / 2
+          // prevPrecision = dynamicPrecision
+          // prevPoint.x = x
+          // prevPoint.y = y
+          // prevAngle = currentAngle
+        }
+      } //else {
+      // this.ctx.moveTo(i, j)
+      // }
+      // }
+    }
+    if (prevPieceIdx !== null) {
+      const prevPieceRightLim = this.figure.figureToCanvasCoords(this.getPieceLimits(prevPieceIdx).right)
+      this.ctx.lineTo(prevPieceRightLim.i, prevPieceRightLim.j)
+    }
+    this.ctx.stroke()
+
+    if (prevPieceIdx !== null) {
+      for (let i = 0; i < this.pieces.length; ++i) {
+        const piece = this.pieces[i], prevPiece = this.pieces[i - 1], nextPiece = this.pieces[i + 1]
+        const centerMin = {
+          x: piece.interval.min.val,
+          y: piece.f(piece.interval.min.val)
+        }
+        if (!piece.interval.min.included && centerMin.y !== prevPiece?.f(prevPiece.interval.max.val)) {
+          this.figure.plotEmptyDot(centerMin)
+        }
+
+        const centerMax = {
+          x: piece.interval.max.val,
+          y: piece.f(piece.interval.max.val)
+        }
+        if (!piece.interval.max.included && centerMax.y !== nextPiece?.f(nextPiece.interval.min.val)) {
+          this.figure.plotEmptyDot(centerMax)
+        }
+      }
+    }
+
+    this.ctx.restore()
+  }
+
   eval(x) {
     for (const piece of this.pieces) {
       if (this.isInInterval(piece.interval, x)) return piece.f(x)
@@ -807,16 +827,17 @@ class Function {
 }
 
 class Drawing {
-  constructor({ figure, points, text = [], styling = {}, stroke = true, fill = false }) {
+  constructor({ figure, points, text = [], styling = {}, stroke = true, fill = false, dots = false, dotRadius = 4 }) {
     this.figure = figure
     this.ctx = figure.ctx
     this.origin = figure.axes.origin
     this.points = points // In figure coords
     this.text = text
     this.styling = styling
-    if (!styling.strokeStyle) this.styling.strokeStyle = 'black'
     this.stroke = stroke
     this.fill = fill
+    this.dots = dots
+    this.dotRadius = dotRadius
     this.visible = true
   }
 
@@ -841,28 +862,42 @@ class Drawing {
   }
 
   draw() {
+    if (!this.visible) return
     this.ctx.save()
 
     for (const key in this.styling) {
-      this.ctx[key] = this.styling[key]
+      if (typeof this.ctx[key] === 'function') this.ctx[key](this.styling[key])
+      else this.ctx[key] = this.styling[key]
     }
 
-    this.ctx.beginPath()
     for (const subDrawingPoints of this.points) {
-      const canvasPoint = this.getCavnasPoint(subDrawingPoints[0])
-      this.ctx.moveTo(canvasPoint.i, canvasPoint.j)
-      for (let i = 1; i < subDrawingPoints.length; ++i) {
-        const canvasPoint = this.getCavnasPoint(subDrawingPoints[i])
-        if (!canvasPoint) console.warn(`Point ${i} in subdrawing`, subDrawingPoints, 'has incorrect format')
-        else this.ctx.lineTo(canvasPoint.i, canvasPoint.j)
+      if (this.stroke || this.fill) {
+        this.ctx.beginPath()
+        const canvasPoint = this.getCavnasPoint(subDrawingPoints[0])
+        this.ctx.moveTo(canvasPoint.i, canvasPoint.j)
+        for (let i = 1; i < subDrawingPoints.length; ++i) {
+          const canvasPoint = this.getCavnasPoint(subDrawingPoints[i])
+          if (!canvasPoint) console.warn(`Point ${i} in subdrawing`, subDrawingPoints, 'has incorrect format')
+          else this.ctx.lineTo(canvasPoint.i, canvasPoint.j)
+        }
+        if (this.stroke) this.ctx.stroke()
+        if (this.fill) this.ctx.fill()
+      }
+      if (this.dots) {
+        this.ctx.beginPath()
+        for (let i = 0; i < subDrawingPoints.length; ++i) {
+          const canvasPoint = this.getCavnasPoint(subDrawingPoints[i])
+          this.ctx.moveTo(canvasPoint.i, canvasPoint.j)
+          if (!canvasPoint) console.warn(`Point ${i} in subdrawing`, subDrawingPoints, 'has incorrect format')
+          else this.ctx.arc(canvasPoint.i, canvasPoint.j, this.dotRadius, 0, 2 * Math.PI)
+        }
+        this.ctx.fill()
       }
     }
     for (const textElem of this.text) {
       const position = this.getCavnasPoint(textElem.position)
       this.ctx.fillText(textElem.string, position.i, position.j)
     }
-    if (this.stroke) this.ctx.stroke()
-    if (this.fill) this.ctx.fill()
 
     this.ctx.restore()
   }
@@ -930,7 +965,7 @@ class Methods {
     li.textContent = newEntry
   }
 
-  plotVerticalLine(x, label = '', color = 'blue', drawingKey = '') {
+  plotVertialLine(x, label = '', color = 'blue', drawingKey = '') {
     const fontSize = 14
     const styling = {
       lineWidth: 1,
@@ -1037,9 +1072,9 @@ class Methods {
       this.updateInfoBoxEntry(stepsLi, 'steps = ' + steps++)
       this.updateInfoBoxEntry(cLi, 'c = ' + c.toPrecision(5))
       this.updateInfoBoxEntry(deltaLi, '|E| <= ' + delta.toPrecision(5))
-      this.plotVerticalLine(a, 'a = ' + a.toPrecision(3), 'green', 'a')
-      this.plotVerticalLine(b, 'b = ' + b.toPrecision(3), 'green', 'b')
-      this.plotVerticalLine(c, 'c = ' + c.toPrecision(3), 'magenta', 'c')
+      this.plotVertialLine(a, 'a = ' + a.toPrecision(3), 'green', 'a')
+      this.plotVertialLine(b, 'b = ' + b.toPrecision(3), 'green', 'b')
+      this.plotVertialLine(c, 'c = ' + c.toPrecision(3), 'magenta', 'c')
     }
 
     let mult = f.eval(a) * f.eval(b)
@@ -1104,16 +1139,16 @@ class Methods {
     const precisionLi = precision ? this.addInfoBoxEntry('precision = ' + precision) : null
     const deltaLi = this.addInfoBoxEntry()
     const statusLi = this.addInfoBoxEntry('Status: Ongoing')
-    this.plotVerticalLine(a, 'a = ' + a.toPrecision(3), 'green', 'a')
-    this.plotVerticalLine(b, 'b = ' + b.toPrecision(3), 'green', 'b')
+    this.plotVertialLine(a, 'a = ' + a.toPrecision(3), 'green', 'a')
+    this.plotVertialLine(b, 'b = ' + b.toPrecision(3), 'green', 'b')
 
     const visuals = () => {
       this.updateInfoBoxEntry(stepsLi, 'steps = ' + steps)
       this.updateInfoBoxEntry(xnLi, `x${steps} = ${xn.toPrecision(5)}`)
       this.updateInfoBoxEntry(deltaLi, '|E| ≈ ' + delta.toPrecision(5))
-      this.plotVerticalLine(xn, `x${steps} = ${xn.toPrecision(3)}`, 'magenta', 'xn')
+      this.plotVertialLine(xn, `x${steps} = ${xn.toPrecision(3)}`, 'magenta', 'xn')
       if (xnPrev) {
-        this.plotVerticalLine(xnPrev, `x${steps - 1} = ${xnPrev.toPrecision(3)}`, 'grey', 'xn-1')
+        this.plotVertialLine(xnPrev, `x${steps - 1} = ${xnPrev.toPrecision(3)}`, 'grey', 'xn-1')
         const slopeFunction = new Function(x => df.eval(xnPrev) * (x - xnPrev) + f.eval(xnPrev), 'magenta')
         this.figure.addFunction(slopeFunction, 'slope')
       }
@@ -1138,7 +1173,7 @@ class Methods {
         }
       } else {
         console.warn("Couldn't verify if f(a)*f''(a) > 0 or f(b)*f''(b) > 0. Choosing x0 = a")
-        console.warn('Remember checking if f is monotonic (df > 0 or df < 0) for all x in', interval)
+        console.warn('Remeber checking that f is monotonic (df > 0 or df < 0) for all x in', interval)
         xn = a
       }
       visuals()
@@ -1161,6 +1196,66 @@ class Methods {
         this.intervalIds.push(intId)
       })
     }
+  }
+
+  triangleThingies(sideLen, dotRadius, iterations, iterDelay = 100) {
+    this.clearInfoBox()
+    this.setInfoBoxTitle('Triangle thingy')
+
+    const iterationsLi = this.addInfoBoxEntry()
+
+    const visuals = () => {
+      this.updateInfoBoxEntry(iterationsLi, `dots: ${i}/${iterations}`)
+    }
+
+    const initDots = [{ x: 0, y: 0 }, { x: sideLen, y: 0 }, { x: sideLen / 2, y: Math.sin(60 * Math.PI / 180) * sideLen }]
+    this.figure.addDrawing(new Drawing({
+      figure: this.figure,
+      points: [initDots],
+      styling: { fillStyle: 'red' },
+      dots: true,
+      dotRadius: 2 * dotRadius,
+      stroke: false
+    }), 'Initial Dots')
+
+    let prevPoint = { x: sideLen / 2, y: 0 }
+    const dots = new Drawing({
+      figure: this.figure,
+      points: [[prevPoint]],
+      styling: { fillStyle: 'green' },
+      dots: true,
+      dotRadius,
+      stroke: false
+    })
+    this.figure.addDrawing(dots, 'Dots')
+
+    function randInt(min, max) {
+      return Math.floor((Math.random() * (max - min + 1))) + min
+    }
+
+    function min(a, b) {
+      return (a < b) ? a : b;
+    }
+
+    let i = 0
+    const intId = setInterval(() => {
+      if (i >= iterations) {
+        clearInterval(intId)
+      } else {
+        ++i
+        const chosenInitDot = initDots[randInt(0, 2)]
+        const newPoint = {
+          x: min(chosenInitDot.x, prevPoint.x) + Math.abs(chosenInitDot.x - prevPoint.x) / 2,
+          y: min(chosenInitDot.y, prevPoint.y) + Math.abs(chosenInitDot.y - prevPoint.y) / 2,
+        }
+        dots.points[0].push(newPoint)
+        this.figure.draw()
+
+        prevPoint = newPoint
+        visuals()
+      }
+    }, iterDelay)
+    this.intervalIds.push(intId)
   }
 }
 
