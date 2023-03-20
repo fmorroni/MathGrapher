@@ -1149,7 +1149,7 @@ class Methods {
       this.plotVertialLine(xn, `x${steps} = ${xn.toPrecision(3)}`, 'magenta', 'xn')
       if (xnPrev) {
         this.plotVertialLine(xnPrev, `x${steps - 1} = ${xnPrev.toPrecision(3)}`, 'grey', 'xn-1')
-        const slopeFunction = new Function(x => df.eval(xnPrev) * (x - xnPrev) + f.eval(xnPrev), 'magenta')
+        const slopeFunction = new Function(this.figure, x => df.eval(xnPrev) * (x - xnPrev) + f.eval(xnPrev), 'magenta')
         this.figure.addFunction(slopeFunction, 'slope')
       }
     }
