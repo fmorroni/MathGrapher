@@ -19,6 +19,8 @@ fig.addFunction(new Function(fig, [
 const M = new Methods(fig)
 M.bisection(fig.functions.get('F0'), [1.8, 3.8])
 ```
+![Exampĺe 1 gif](example_gifs/MathGrapherExample1.gif)
+
 ### Example 2
 ```javascript
 const f = new Function(fig, x => Math.sin(x)+0.8, 'red')
